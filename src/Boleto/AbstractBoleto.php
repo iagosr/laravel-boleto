@@ -10,6 +10,7 @@ use Eduardokum\LaravelBoleto\Contracts\Boleto\Boleto;
 use Eduardokum\LaravelBoleto\Contracts\Pessoa as PessoaContract;
 use Eduardokum\LaravelBoleto\Contracts\Boleto\Boleto as BoletoContract;
 use Eduardokum\LaravelBoleto\Util;
+use Illuminate\Support\Str;
 
 /**
  * Class AbstractBoleto
@@ -18,6 +19,13 @@ use Eduardokum\LaravelBoleto\Util;
  */
 abstract class AbstractBoleto implements BoletoContract
 {
+
+    const SITUACAO_REJEITADO = 'rejeitado';
+    const SITUACAO_ABERTO = 'aberto';
+    const SITUACAO_BAIXADO = 'baixado';
+    const SITUACAO_PAGO = 'pago';
+    const SITUACAO_PROTESTADO = 'protestado';
+
     /**
      * Campos que são necessários para o boleto
      *
@@ -51,67 +59,67 @@ abstract class AbstractBoleto implements BoletoContract
      *
      * @var float
      */
-    protected $valor;
+    public $valor;
     /**
      * Desconto total do boleto
      *
      * @var float
      */
-    protected $desconto;
+    public $desconto;
     /**
      * Valor para multa
      *
      * @var float
      */
-    protected $multa = 0;
+    public $multa = 0;
     /**
      * Valor para mora juros
      *
      * @var float
      */
-    protected $juros = 0;
+    public $juros = 0;
     /**
      * Dias apos vencimento do juros
      *
      * @var int
      */
-    protected $jurosApos = 0;
+    public $jurosApos = 0;
     /**
      * Dias para protesto
      *
      * @var integer
      */
-    protected $diasProtesto = 0;
+    public $diasProtesto = 0;
     /**
      * Dias para baixa automática
      *
      * @var integer
      */
-    protected $diasBaixaAutomatica;
+    public $diasBaixaAutomatica;
     /**
      * Data do documento
      *
      * @var \Carbon\Carbon
      */
-    protected $dataDocumento;
+    public $dataDocumento;
     /**
      * Data de emissão
      *
      * @var \Carbon\Carbon
      */
-    protected $dataProcessamento;
+    public $dataProcessamento;
     /**
      * Data de vencimento
      *
      * @var \Carbon\Carbon
      */
-    protected $dataVencimento;
+    public $dataVencimento;
     /**
      * Data de limite de desconto
      *
      * @var \Carbon\Carbon
      */
-    protected $dataDesconto;
+    public $dataDesconto;
     /**
      * Campo de aceite
      *
@@ -147,25 +155,31 @@ abstract class AbstractBoleto implements BoletoContract
      *
      * @var int
      */
-    protected $numeroDocumento;
+    public $numeroDocumento;
     /**
      * Define o número definido pelo cliente para compor o Nosso Número
      *
      * @var int
      */
-    protected $numero;
+    public $numero;
     /**
      * Define o número definido pelo cliente para controle da remessa
      *
      * @var string
      */
-    protected $numeroControle;
+    public $numeroControle;
     /**
      * Campo de uso do banco no boleto
      *
      * @var string
      */
     protected $usoBanco;
+    /**
+     * Chave da nfe para cnab de 444 posições
+     *
+     * @var string
+     */
+    public $chaveNfe;
     /**
      * Agência
      *
@@ -199,7 +213,7 @@ abstract class AbstractBoleto implements BoletoContract
     /**
      * Define as carteiras disponíveis para cada banco
      *
-     * @var array
+     * @var array|bool
      */
     protected $carteiras = [];
     /**
@@ -213,19 +227,19 @@ abstract class AbstractBoleto implements BoletoContract
      *
      * @var PessoaContract
      */
-    protected $beneficiario;
+    public $beneficiario;
     /**
      * Entidade pagadora (de quem se cobra o boleto)
      *
      * @var PessoaContract
      */
-    protected $pagador;
+    public $pagador;
     /**
      * Entidade sacador avalista
      *
      * @var PessoaContract
      */
-    protected $sacadorAvalista;
+    public $sacadorAvalista;
     /**
      * Array com as linhas do demonstrativo (descrição do pagamento)
      *
@@ -294,7 +308,7 @@ abstract class AbstractBoleto implements BoletoContract
      *
      * @var int
      */
-    protected $status = BoletoContract::STATUS_REGISTRO;
+    public $status = BoletoContract::STATUS_REGISTRO;
 
     /**
      * @var int
@@ -307,6 +321,33 @@ abstract class AbstractBoleto implements BoletoContract
      * @var boolean
      */
     protected $mostrarEnderecoFichaCompensacao = false;
+
+    /**
+     * Situacao do boleto no banco, pago aberto portestado...
+     *
+     * @var string
+     */
+    public $situacao;
+
+    /**
+     * Data da situacao
+     *
+     * @var \Carbon\Carbon
+     */
+    public $dataSituacao;
+
+    /**
+     * Valor Recebido
+     */
+    public $valorRecebido;
+
+    /**
+     *
+     * Recebe a imagem em base 64 do QR Code do PIX
+     *
+     * @var ?string
+     */
+    private $pixQrCode = null;
 
     /**
      * AbstractBoleto constructor.
@@ -432,7 +473,7 @@ abstract class AbstractBoleto implements BoletoContract
      */
     public function setCarteira($carteira)
     {
-        if (!in_array($carteira, $this->getCarteiras())) {
+        if ($this->getCarteiras() !== false && !in_array($carteira, $this->getCarteiras())) {
             throw new \Exception("Carteira não disponível!");
         }
         $this->carteira = $carteira;
@@ -453,7 +494,7 @@ abstract class AbstractBoleto implements BoletoContract
     /**
      * Retorna as carteiras disponíveis para este banco
      *
-     * @return array
+     * @return array|bool
      */
     public function getCarteiras()
     {
@@ -613,15 +654,15 @@ abstract class AbstractBoleto implements BoletoContract
     {
         return $this->dataDocumento;
     }
-	
-   /**
+
+    /**
      * Retorna a data do juros após
      *
      * @return \Carbon\Carbon
      */
     public function getDataVencimentoApos()
     {
-        return $this->getDataVencimento()->addDays((int) $this->getJurosApos());
+        return $this->getDataVencimento()->copy()->addDays((int) $this->getJurosApos());
     }
 
     /**
@@ -788,6 +829,37 @@ abstract class AbstractBoleto implements BoletoContract
     public function getUsoBanco()
     {
         return $this->usoBanco;
+    }
+
+    /**
+     * Define o campo Chave da nfe para cnab de 444 posições
+     *
+     * @param string $chaveNfe
+     *
+     * @return AbstractBoleto
+     * @throws \Exception
+     */
+    public function setChaveNfe($chaveNfe)
+    {
+        $chaveNfe = Util::onlyNumbers($chaveNfe);
+
+        if (strlen($chaveNfe) != 44) {
+            throw new \Exception('Chave de nfe não possui 44 posições');
+        }
+
+        $this->chaveNfe = $chaveNfe;
+
+        return $this;
+    }
+
+    /**
+     * Retorna o campo Chave da nfe
+     *
+     * @return string
+     */
+    public function getChaveNfe()
+    {
+        return $this->chaveNfe;
     }
 
     /**
@@ -1137,7 +1209,7 @@ abstract class AbstractBoleto implements BoletoContract
     public function getMoraDia()
     {
         if ($this->getJuros() <= 0) {
-           return 0;
+            return 0;
         }
         return Util::percent($this->getValor(), $this->getJuros())/30;
     }
@@ -1177,11 +1249,12 @@ abstract class AbstractBoleto implements BoletoContract
      */
     public function setDiasProtesto($diasProtesto)
     {
-        if ($this->getDiasBaixaAutomatica() > 0) {
-            throw new \Exception('Você deve usar dias de protesto ou dias de baixa, nunca os 2');
-        }
         $diasProtesto = (int)$diasProtesto;
         $this->diasProtesto = $diasProtesto > 0 ? $diasProtesto : 0;
+        
+        if (!empty($diasProtesto) && $this->getDiasBaixaAutomatica() > 0) {
+            throw new \Exception('Você deve usar dias de protesto ou dias de baixa, nunca os 2');
+        }       
 
         return $this;
     }
@@ -1211,7 +1284,7 @@ abstract class AbstractBoleto implements BoletoContract
     }
 
     /**
-     * Retorna os diasProtesto
+     * Retorna os diasBaixaAutomatica
      *
      * @param int $default
      *
@@ -1219,6 +1292,11 @@ abstract class AbstractBoleto implements BoletoContract
      */
     public function getDiasBaixaAutomatica($default = 0)
     {
+        //Caso não tenha valor definido de dias pra protesto setar 60 dias como valor padrão para baixa automatica.
+        //O valor padrão só será utilizado caso não haja nenhum valor definido para baixaAutomatica
+        if(empty($this->getDiasProtesto())){
+            $default = (empty($default)?60:$default);
+        }
         return $this->diasBaixaAutomatica > 0 ? $this->diasBaixaAutomatica : $default;
     }
 
@@ -1350,7 +1428,7 @@ abstract class AbstractBoleto implements BoletoContract
      *
      * @throws \Exception
      */
-    final public function setNossoNumero()
+    public function setNossoNumero($nossoNumero)
     {
         throw new \Exception('Não é possível definir o nosso número diretamente. Utilize o método setNumero.');
     }
@@ -1402,11 +1480,15 @@ abstract class AbstractBoleto implements BoletoContract
     public function isValid(&$messages)
     {
         foreach ($this->camposObrigatorios as $campo) {
-            $test = call_user_func([$this, 'get' . ucwords($campo)]);
+            $test = call_user_func([$this, 'get' . Str::camel($campo)]);
             if ($test === '' || is_null($test)) {
                 $messages .= "Campo $campo está em branco";
                 return false;
             }
+        }
+        if (empty($this->campoNossoNumero) && empty($this->gerarNossoNumero())) {
+            $messages .= "Campo nosso número está em branco";
+            return false;
         }
         return true;
     }
@@ -1418,8 +1500,8 @@ abstract class AbstractBoleto implements BoletoContract
      */
     public function getAgenciaCodigoBeneficiario()
     {
-        $agencia = $this->getAgenciaDv() !== null ? $this->getAgencia() . '-' . $this->getAgenciaDv() : $this->getAgencia();
-        $conta = $this->getContaDv() !== null ? $this->getConta() . '-' . $this->getContaDv() : $this->getConta();
+        $agencia = rtrim(sprintf('%s-%s', $this->getAgencia(), $this->getAgenciaDv()), '-');
+        $conta = rtrim(sprintf('%s-%s', $this->getConta(), $this->getContaDv()), '-');
 
         return $agencia . ' / ' . $conta;
     }
@@ -1536,6 +1618,132 @@ abstract class AbstractBoleto implements BoletoContract
     }
 
     /**
+     * @return string
+     */
+    public function getSituacao()
+    {
+        return $this->situacao;
+    }
+
+    /**
+     * @param string $situacao
+     *
+     * @return AbstractBoleto
+     */
+    public function setSituacao($situacao)
+    {
+        $this->situacao = $situacao;
+
+        return $this;
+    }
+
+    /**
+     * @return Carbon
+     */
+    public function getDataSituacao()
+    {
+        return $this->dataSituacao;
+    }
+
+    /**
+     * @param Carbon $dataSituacao
+     *
+     * @return AbstractBoleto
+     */
+    public function setDataSituacao($dataSituacao)
+    {
+        $this->dataSituacao = $dataSituacao;
+
+        return $this;
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getValorRecebido()
+    {
+        return $this->valorRecebido;
+    }
+
+    /**
+     * @param mixed $valorRecebido
+     *
+     * @return AbstractBoleto
+     */
+    public function setValorRecebido($valorRecebido)
+    {
+        $this->valorRecebido = $valorRecebido;
+
+        return $this;
+    }
+
+    /**
+     * @return ?string
+     */
+    public function getPixQrCode(): ?string
+    {
+        return $this->pixQrCode;
+    }
+
+    /**
+     * @param string $pixQrCode
+     */
+    public function setPixQrCode(string $pixQrCode): void
+    {
+        $this->pixQrCode = $pixQrCode;
+    }
+
+    /**
+     * @param $situacao
+     *
+     * @return bool
+     */
+    public function isSituacao($situacao)
+    {
+        return $this->situacao == $situacao;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isRejeitado()
+    {
+        return $this->isSituacao(self::SITUACAO_REJEITADO);
+    }
+
+    /**
+     * @return bool
+     */
+    public function isAberto()
+    {
+        return $this->isSituacao(self::SITUACAO_ABERTO);
+    }
+
+    /**
+     * @return bool
+     */
+    public function isBaixado()
+    {
+        return $this->isSituacao(self::SITUACAO_BAIXADO);
+    }
+
+    /**
+     * @return bool
+     */
+    public function isPago()
+    {
+        return $this->isSituacao(self::SITUACAO_PAGO);
+    }
+
+    /**
+     * @return bool
+     */
+    public function isProtestado()
+    {
+        return $this->isSituacao(self::SITUACAO_PROTESTADO);
+    }
+
+    /**
      * Render PDF
      *
      * @param bool $print
@@ -1544,12 +1752,12 @@ abstract class AbstractBoleto implements BoletoContract
      * @return string
      * @throws \Exception
      */
-     public function renderPDF($print = false, $instrucoes = true)
+    public function renderPDF($print = false, $instrucoes = true)
     {
         if($this->codigoBanco == 104){
-           $pdf = new PdfCaixa();
+            $pdf = new PdfCaixa();
         }else{
-           $pdf = new Pdf();
+            $pdf = new Pdf();
         }
         $pdf->addBoleto($this);
         !$print || $pdf->showPrint();
@@ -1604,10 +1812,18 @@ abstract class AbstractBoleto implements BoletoContract
      */
     public function toArray()
     {
+        $nosso_numero = $nosso_numero_boleto = $linha_digitavel = $codigo_barras = null;
+        try {
+            $nosso_numero = $this->getNossoNumero();
+            $nosso_numero_boleto = $this->getNossoNumeroBoleto();
+            $linha_digitavel = $this->getLinhaDigitavel();
+            $codigo_barras = $this->getCodigoBarras();
+        } catch (\Exception $e) {}
+
         return array_merge(
             [
-                'linha_digitavel' => $this->getLinhaDigitavel(),
-                'codigo_barras' => $this->getCodigoBarras(),
+                'linha_digitavel' => $linha_digitavel,
+                'codigo_barras' => $codigo_barras,
                 'beneficiario' => [
                     'nome' => $this->getBeneficiario()->getNome(),
                     'endereco' => $this->getBeneficiario()->getEndereco(),
@@ -1649,7 +1865,7 @@ abstract class AbstractBoleto implements BoletoContract
                         'documento' => $this->getSacadorAvalista()->getDocumento(),
                         'nome_documento' => $this->getSacadorAvalista()->getNomeDocumento(),
                         'endereco2' => $this->getSacadorAvalista()->getCepCidadeUf(),
-						'endereco_completo' => $this->getSacadorAvalista()->getEnderecoCompleto(),
+                        'endereco_completo' => $this->getSacadorAvalista()->getEnderecoCompleto(),
                     ]
                         : [],
                 'pagador' => [
@@ -1662,7 +1878,7 @@ abstract class AbstractBoleto implements BoletoContract
                     'documento' => $this->getPagador()->getDocumento(),
                     'nome_documento' => $this->getPagador()->getNomeDocumento(),
                     'endereco2' => $this->getPagador()->getCepCidadeUf(),
-					'endereco_completo' => $this->getPagador()->getEnderecoCompleto(),
+                    'endereco_completo' => $this->getPagador()->getEnderecoCompleto(),
                 ],
                 'demonstrativo' => $this->getDescricaoDemonstrativo(),
                 'instrucoes' => $this->getInstrucoes(),
@@ -1672,8 +1888,8 @@ abstract class AbstractBoleto implements BoletoContract
                 'numero_documento' => $this->getNumeroDocumento(),
                 'numero_controle' => $this->getNumeroControle(),
                 'agencia_codigo_beneficiario' => $this->getAgenciaCodigoBeneficiario(),
-                'nosso_numero' => $this->getNossoNumero(),
-                'nosso_numero_boleto' => $this->getNossoNumeroBoleto(),
+                'nosso_numero' => $nosso_numero,
+                'nosso_numero_boleto' => $nosso_numero_boleto,
                 'especie_doc' => $this->getEspecieDoc(),
                 'especie_doc_cod' => $this->getEspecieDocCodigo(),
                 'aceite' => $this->getAceite(),
@@ -1681,8 +1897,10 @@ abstract class AbstractBoleto implements BoletoContract
                 'carteira_nome' => $this->getCarteiraNome(),
                 'uso_banco' => $this->getUsoBanco(),
                 'status' => $this->getStatus(),
-                'mostrar_endereco_ficha_compensacao' => $this->getMostrarEnderecoFichaCompensacao()
+                'mostrar_endereco_ficha_compensacao' => $this->getMostrarEnderecoFichaCompensacao(),
+                'pix_qrcode' => $this->getPixQrCode(),
             ], $this->variaveis_adicionais
         );
     }
 }
+

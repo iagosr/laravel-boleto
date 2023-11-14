@@ -4,6 +4,7 @@ namespace Eduardokum\LaravelBoleto;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Eduardokum\LaravelBoleto\Contracts\Boleto\Boleto as BoletoContract;
+use Illuminate\Support\Str;
 
 /**
  * Class Util
@@ -24,6 +25,7 @@ final class Util
         '000' => 'Banco Bankpar S.A.',
         '740' => 'Banco Barclays S.A.',
         '107' => 'Banco BBM S.A.',
+        '077' => 'Banco Inter S.A.',
         '031' => 'Banco Beg S.A.',
         '739' => 'Banco BGN S.A.',
         '096' => 'Banco BM&F de Serviços de Liquidação e Custódia S.A',
@@ -109,6 +111,7 @@ final class Util
         '082' => 'Banco Topázio S.A.',
         'M20' => 'Banco Toyota do Brasil S.A.',
         '634' => 'Banco Triângulo S.A.',
+        '136' => 'Banco Unicred do Brasil',
         'M14' => 'Banco Volkswagen S.A.',
         'M23' => 'Banco Volvo (Brasil) S.A.',
         '655' => 'Banco Votorantim S.A.',
@@ -133,10 +136,12 @@ final class Util
         '492' => 'ING Bank N.V.',
         '652' => 'Itaú Unibanco Holding S.A.',
         '341' => 'Itaú Unibanco S.A.',
+        '435' => 'Delcred SCD S.A',
         '488' => 'JPMorgan Chase Bank',
         '751' => 'Scotiabank Brasil S.A. Banco Múltiplo',
         '409' => 'UNIBANCO - União de Bancos Brasileiros S.A.',
         '230' => 'Unicard Banco Múltiplo S.A.',
+        '712' => 'Banco Ourinvest',
         'XXX' => 'Desconhecido',
     ];
 
@@ -299,7 +304,8 @@ final class Util
     /**
      * Função para limpar acentos de uma string
      *
-     * @param  string $string
+     * @param string $string
+     *
      * @return string
      */
     public static function normalizeChars($string)
@@ -317,7 +323,8 @@ final class Util
 
             'ß' => 'sz', 'þ' => 'thorn', 'º' => '', 'ª' => '', '°' => '',
         );
-        return preg_replace('/[^0-9a-zA-Z !*\-$\(\)\[\]\{\},.;:\/\\#%&@+=]/', '', strtr($string, $normalizeChars));
+
+        return preg_replace('/[^0-9a-zA-Z !+=*\-,.;:%@_]/', '', strtr($string, $normalizeChars));
     }
 
     /**
@@ -500,7 +507,12 @@ final class Util
     public static function fatorVencimento($date, $format = 'Y-m-d')
     {
         $date = ($date instanceof Carbon) ? $date : Carbon::createFromFormat($format, $date)->setTime(0, 0, 0);
-        return (new Carbon('1997-10-07'))->diffInDays($date);
+        $fator = (new Carbon('1997-10-07'))->diffInDays($date);
+        $limit = $fator % 9000;
+        if ($limit >= 1000) {
+            return $limit;
+        }
+        return $limit + 9000;
     }
 
     /**
@@ -657,6 +669,7 @@ final class Util
             self::adiciona($retorno[0], 31, 36, self::remove(31, 36, $remessa[0]));
             break;
         case Contracts\Boleto\Boleto::COD_BANCO_BRADESCO:
+        case Contracts\Boleto\Boleto::COD_BANCO_OURINVEST:
             self::adiciona($retorno[0], 27, 46, self::remove(27, 46, $remessa[0]));
             break;
         case Contracts\Boleto\Boleto::COD_BANCO_ITAU:
@@ -689,6 +702,9 @@ final class Util
         array_pop($remessa); // remove o trailer
 
         foreach ($remessa as $detalhe) {
+            if (!in_array(self::remove(1, 2, $detalhe), [0, 1, 9])) {
+                continue;
+            }
             $i = count($retorno);
             $retorno[$i] = array_fill(0, 400, '0');
             self::adiciona($retorno[$i], 1, 1, '1');
@@ -716,6 +732,7 @@ final class Util
                 self::adiciona($retorno[$i], 57, 73, self::remove(57, 73, $detalhe));
                 break;
             case Contracts\Boleto\Boleto::COD_BANCO_BRADESCO:
+            case Contracts\Boleto\Boleto::COD_BANCO_OURINVEST:
                 self::adiciona($retorno[$i], 25, 29, self::remove(25, 29, $detalhe));
                 self::adiciona($retorno[$i], 30, 36, self::remove(30, 36, $detalhe));
                 self::adiciona($retorno[$i], 37, 37, self::remove(37, 37, $detalhe));
@@ -767,7 +784,7 @@ final class Util
     public static function remove($i, $f, &$array)
     {
         if (is_string($array)) {
-            $array = preg_split('//u', rtrim($array, chr(10) . chr(13) . "\n" . "\r"), null, PREG_SPLIT_NO_EMPTY);
+            $array = preg_split('//u', rtrim($array, chr(10) . chr(13) . "\n" . "\r"), -1, PREG_SPLIT_NO_EMPTY);
         }
 
         $i--;
@@ -806,7 +823,7 @@ final class Util
     {
         $i--;
 
-        if ($i > 398 || $f > 400) {
+        if (($i > 398 || $f > 400) && ($i != 401 && $f != 444)) {
             throw new \Exception('$ini ou $fim ultrapassam o limite máximo de 400');
         }
 
@@ -904,12 +921,12 @@ final class Util
     public static function fillClass(&$obj, array $params)
     {
         foreach ($params as $param => $value) {
-            $param = str_replace(' ', '', ucwords(str_replace('_', ' ', $param)));
+            $param = Str::camel($param);
             if (method_exists($obj, 'getProtectedFields') && in_array(lcfirst($param), $obj->getProtectedFields())) {
                 continue;
             }
-            if (method_exists($obj, 'set' . ucwords($param))) {
-                $obj->{'set' . ucwords($param)}($value);
+            if (method_exists($obj, 'set' . Str::camel($param))) {
+                $obj->{'set' . Str::camel($param)}($value);
             }
         }
     }
@@ -955,7 +972,9 @@ final class Util
             'valor' => ((float) substr($barras, 9, 10)) / 100,
             'campo_livre' => substr($barras, -25),
         ];
+
         $class = __NAMESPACE__ . '\\Boleto\\' . self::getBancoClass($variaveis['banco']);
+
         if (method_exists($class, 'parseCampoLivre')) {
             $variaveis['campo_livre_parsed'] = $class::parseCampoLivre($variaveis['campo_livre']);
         } else {
@@ -975,15 +994,21 @@ final class Util
 
         $aBancos = [
             BoletoContract::COD_BANCO_BB => 'Banco\\Bb',
+            BoletoContract::COD_BANCO_BNB => 'Banco\\Bnb',
             BoletoContract::COD_BANCO_SANTANDER => 'Banco\\Santander',
+            BoletoContract::COD_BANCO_BANRISUL => 'Banco\\Banrisul',
+            BoletoContract::COD_BANCO_INTER => 'Banco\\Inter',
             BoletoContract::COD_BANCO_CEF => 'Banco\\Caixa',
+            BoletoContract::COD_BANCO_UNICRED => 'Banco\\Unicred',
             BoletoContract::COD_BANCO_BRADESCO => 'Banco\\Bradesco',
+            BoletoContract::COD_BANCO_FIBRA => 'Banco\\Fibra',
             BoletoContract::COD_BANCO_ITAU => 'Banco\\Itau',
             BoletoContract::COD_BANCO_HSBC => 'Banco\\Hsbc',
+            BoletoContract::COD_BANCO_DELCRED => 'Banco\\Delbank',
+            BoletoContract::COD_BANCO_PINE => 'Banco\\Pine',
+            BoletoContract::COD_BANCO_OURINVEST => 'Banco\\Ourinvest',
             BoletoContract::COD_BANCO_SICREDI => 'Banco\\Sicredi',
-            BoletoContract::COD_BANCO_BANRISUL => 'Banco\\Banrisul',
             BoletoContract::COD_BANCO_BANCOOB => 'Banco\\Bancoob',
-            BoletoContract::COD_BANCO_BNB => 'Banco\\Bnb',
         ];
 
         if (array_key_exists($banco, $aBancos)) {
@@ -1024,5 +1049,36 @@ final class Util
             $appended .= " $string";
         }
         return trim($appended);
+    }
+
+    /**
+     * Return value or null.
+     *
+     * @param       $a
+     * @param array $parms
+     *
+     * @return int
+     * @internal param $key
+     * @internal param int $default
+     *
+     */
+    public static function whichOne($a, ...$parms)
+    {
+        if (is_array($parms[0])) {
+            $parms = $parms[0];
+        }
+        foreach ($parms as $parm) {
+            if (is_object($a)) {
+                if (isset($a->{$parm})) {
+                    return $a->{$parm};
+                }
+            } else {
+                if (array_key_exists($parm, $a)) {
+                    return $a[$parm];
+                }
+            }
+        }
+
+        return null;
     }
 }

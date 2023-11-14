@@ -93,6 +93,7 @@ class Pdf extends AbstractPdf implements PdfContract
             $this->SetFont($this->PadraoFont, '', $this->fcel);
         }
 
+
         $this->traco('Recibo do Pagador', 4);
         return $this;
     }
@@ -315,7 +316,7 @@ class Pdf extends AbstractPdf implements PdfContract
         $this->Cell(50, $this->cell, $this->_(''), 'R', 1);
 
         $this->Cell(120, $this->desc, $this->_(''), 'LR');
-        $this->Cell(50, $this->desc, $this->_('(+) Mora / Multa' . ($this->boleto[$i]->getCodigoBanco() == '104') ? ' / Juros' : ''), 'TR', 1);
+        $this->Cell(50, $this->desc, $this->_('(+) Mora / Multa' . ($this->boleto[$i]->getCodigoBanco() == '104' ? ' / Juros' : '')), 'TR', 1);
 
         $this->Cell(120, $this->cell, $this->_(''), 'LR');
         $this->Cell(50, $this->cell, $this->_(''), 'R', 1);
@@ -363,6 +364,19 @@ class Pdf extends AbstractPdf implements PdfContract
 
             $this->SetXY($xOriginal, $yOriginal);
         }
+
+        if ($this->boleto[$i]->getPixQrCode() !== null){
+            $img = explode(',',$this->boleto[$i]->getPixQrCode(),2)[1];
+            $pic = 'data://text/plain;base64,'. $img;
+
+            $this->SetXY(112, 216);
+            $this->SetFont($this->PadraoFont, '', 6);
+            $this->Cell(60, $this->cell, "Pague via PIX", "", "", "L");
+            $this->Image($pic, 110,220,20,20,'png');
+
+            $this->SetXY($xOriginal, $yOriginal);
+        }
+
         return $this;
     }
 
@@ -496,7 +510,7 @@ class Pdf extends AbstractPdf implements PdfContract
     {
         foreach ($lista as $d) {
             $pulaLinha -= 2;
-            $this->MultiCell(0, $this->cell - 0.2, $this->_(preg_replace('/(%)/', '%$1', $d)), 0, 1);
+            $this->MultiCell(0, $this->cell - 0.2, $this->_(preg_replace('/(%)/', '%$1', $d ?? '')), 0, 1);
         }
 
         return $pulaLinha;

@@ -126,7 +126,7 @@ class Santander extends AbstractRemessa implements RemessaContract
     private $total = 0;
 
     /**
-     * @return $this
+     * @return Santander
      * @throws \Exception
      */
     protected function header()
@@ -152,15 +152,19 @@ class Santander extends AbstractRemessa implements RemessaContract
     }
 
     /**
-     * @param BoletoContract $boleto
+     * @param \Eduardokum\LaravelBoleto\Boleto\Banco\Santander $boleto
      *
-     * @return $this
+     * @return Santander
      * @throws \Exception
      */
     public function addBoleto(BoletoContract $boleto)
     {
         $this->boletos[] = $boleto;
-        $this->iniciaDetalhe();
+        if ($chaveNfe = $boleto->getChaveNfe()) {
+            $this->iniciaDetalheExtendido();
+        } else {
+            $this->iniciaDetalhe();
+        }
 
         $this->total += $boleto->getValor();
 
@@ -233,12 +237,15 @@ class Santander extends AbstractRemessa implements RemessaContract
         $this->add(392, 393, Util::formatCnab('9', $boleto->getDiasProtesto('0'), 2));
         $this->add(394, 394, '');
         $this->add(395, 400, Util::formatCnab('9', $this->iRegistros + 1, 6));
+        if ($chaveNfe) {
+            $this->add(401, 444, Util::formatCnab('9', $chaveNfe, 44));
+        }
 
         return $this;
     }
 
     /**
-     * @return $this
+     * @return Santander
      * @throws \Exception
      */
     protected function trailer()
